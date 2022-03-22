@@ -184,8 +184,9 @@ CompressionCodecFactory::CompressionCodecFactory()
     registerCodecGorilla(*this);
     registerCodecEncrypted(*this);
     registerCodecMultiple(*this);
+	registerCodecLZ4Qat(*this);
 
-    default_codec = get("LZ4", {});
+    default_codec = get("LZ4QAT", {});
 }
 
 CompressionCodecFactory & CompressionCodecFactory::instance()
