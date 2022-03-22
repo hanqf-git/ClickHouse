@@ -22,7 +22,7 @@
 namespace DB
 {
 
-class CompressionCodecQatLZ4 : public ICompressionCodec  // TODO: can be derived from CompressionCodecLZ4 to only replace compression or decompression, to let QAT only do com or dec task.
+class CompressionCodecQatLZ4 : public  ICompressionCodec  // TODO: can be derived from CompressionCodecLZ4 to only replace compression or decompression, to let QAT only do com or dec task.
 {
 public:
     explicit CompressionCodecLZ4();
@@ -43,6 +43,7 @@ protected:
 
 private:
     QzSession_T m_sess;  // TODO: make a session pool to use
+    QzSessionParams_T m_params;
     uint8_t m_sw_backup = 1; //sw backup enabled.
 };
 
@@ -53,7 +54,22 @@ CompressionCodecQatLZ4::CompressionCodecQatLZ4()
     int ret = qzInit(&m_sess, m_sw_backup);
     if (QZ_PARAMS == ret || QZ_NOSW_NO_HW == ret || QZ_FAIL == ret) 
     {
-        throw Exception("QatLZ4 init failed", ErrorCodes::CANNOT_DECOMPRESS);
+        throw Exception("QatLZ4 init failed", ErrorCodes::CANNOT_COMPRESS);
+    }
+
+    qzGetDefaults(&m_params);
+    m_params.data_fmt           = QZ_LZ4_FH;
+    m_params.comp_lvl           = 1;
+    m_params.comp_algorithm     = QZ_LZ4;
+    m_params.sw_backup          = 0;
+    m_params.hw_buff_sz         = QZ_HW_BUFF_SZ;
+    m_params.strm_buff_sz       = QZ_HW_BUFF_SZ;
+    m_params.input_sz_thrshold  = QZ_COMP_THRESHOLD_MINIMUM;
+
+    ret = qzSetupSession(&m_sess, &m_params);
+    if (ret != QZ_OK)
+    {
+        throw Exception("QatLZ4 setup session failed", ErrorCodes::CANNOT_COMPRESS);
     }
 }
 
@@ -87,15 +103,14 @@ UInt32 CompressionCodecQatLZ4::getMaxCompressedDataSize(UInt32 uncompressed_size
 
 UInt32 CompressionCodecQatLZ4::doCompressData(const char * source, UInt32 source_size, char * dest) const
 {
-    //return LZ4_compress_default(source, dest, source_size, LZ4_COMPRESSBOUND(source_size));
     Int32  ret = QZ_OK;
-    UInt32 dest_size = LZ4_COMPRESSBOUND(source_size);
+    UInt32 dest_size = getMaxCompressedDataSize(source_size);
     UInt32 last_flag = 1;
 
     ret = qzCompress(&m_sess, source, &source_size, dest, &dest_size, last_flag);
     if (ret != QZ_OK)
     {
-        throw Exception("Cannot decompress", ErrorCodes::CANNOT_DECOMPRESS);
+        throw Exception("Cannot compress", ErrorCodes::CANNOT_COMPRESS);
         return 0;
     }
 // TODO: check whether the compressed  result of LZ4 has header and footer .
@@ -104,12 +119,7 @@ UInt32 CompressionCodecQatLZ4::doCompressData(const char * source, UInt32 source
 
 void CompressionCodecQatLZ4::doDecompressData(const char * source, UInt32 source_size, char * dest, UInt32 uncompressed_size) const
 {
-    //bool success = LZ4::decompress(source, dest, source_size, uncompressed_size, lz4_stat);
-
-    //if (!success)
-    //    throw Exception("Cannot decompress", ErrorCodes::CANNOT_DECOMPRESS);
     Int32  ret = QZ_OK;
-    QzSession_T sess;
 
     ret = qzDecompress(&m_sess, source, &source_size, dest, &uncompressed_size);
     if (ret != QZ_OK)
