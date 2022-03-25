@@ -77,6 +77,7 @@ int mainEntryClickHouseCompressor(int argc, char ** argv)
         ("block-size,b", po::value<unsigned>()->default_value(DBMS_DEFAULT_BUFFER_SIZE), "compress in blocks of specified size")
         ("hc", "use LZ4HC instead of LZ4")
         ("zstd", "use ZSTD instead of LZ4")
+        ("qatlz4", "use QATLZ4 instead of LZ4")
         ("codec", po::value<std::vector<std::string>>()->multitoken(), "use codecs combination instead of LZ4")
         ("level", po::value<int>(), "compression level for codecs specified via flags")
         ("none", "use no compression instead of LZ4")
@@ -105,6 +106,7 @@ int mainEntryClickHouseCompressor(int argc, char ** argv)
         bool use_zstd = options.count("zstd");
         bool stat_mode = options.count("stat");
         bool use_none = options.count("none");
+        bool use_qatlz4 = options.count("qatlz4");
         unsigned block_size = options["block-size"].as<unsigned>();
         std::vector<std::string> codecs;
         if (options.count("codec"))
@@ -124,6 +126,8 @@ int mainEntryClickHouseCompressor(int argc, char ** argv)
             method_family = "ZSTD";
         else if (use_none)
             method_family = "NONE";
+        else if (use_qatlz4)
+            method_family = "QATLZ4";
 
         std::optional<int> level = std::nullopt;
         if (options.count("level"))

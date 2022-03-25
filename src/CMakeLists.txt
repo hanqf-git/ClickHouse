@@ -339,6 +339,8 @@ set_source_files_properties(
 target_link_libraries(clickhouse_common_io PUBLIC ch_contrib::re2_st)
 target_link_libraries(clickhouse_common_io PUBLIC ch_contrib::re2)
 
+set(QATZIP_LIBRARY "${ClickHouse_SOURCE_DIR}/contrib/qatzip/lib/libqatzip.so")
+set(QATZIP_INCLUDE_DIR "${ClickHouse_SOURCE_DIR}/contrib/qatzip/include")
 target_link_libraries (clickhouse_common_io PUBLIC  ${QATZIP_LIBRARY})
 target_include_directories (clickhouse_common_io SYSTEM BEFORE PUBLIC ${QATZIP_INCLUDE_DIR})
 
