@@ -3,6 +3,8 @@
 
 #include <qatzip.h>
 #include <qz_utils.h>
+#include <Poco/Logger.h>
+#include <base/logger_useful.h>
 
 #include <Compression/ICompressionCodec.h>
 #include <Compression/CompressionInfo.h>
@@ -46,6 +48,7 @@ protected:
 private:
     QzSessionParams_T m_params;
     uint8_t m_sw_backup = 1; //sw backup enabled.
+    Poco::Logger * log = &Poco::Logger::get("CompressionCodecQatLZ4");
 };
 
 namespace ErrorCodes
@@ -80,6 +83,7 @@ CompressionCodecQatLZ4::CompressionCodecQatLZ4()
     {
         throw Exception("QatLZ4 setup session failed", ErrorCodes::ILLEGAL_CODEC_PARAMETER);
     }
+    LOG_WARNING(log, "CompressionCodecQatLZ4() called.");
 }
 
 uint8_t CompressionCodecQatLZ4::getMethodByte() const
@@ -115,12 +119,13 @@ unsigned int CompressionCodecQatLZ4::doCompressData(const char * source, unsigne
     Int32  ret = QZ_OK;
     unsigned int dest_size = getMaxCompressedDataSize(source_size);
     unsigned int last_flag = 1;
-
+    LOG_WARNING(log, "doCompressData called.");
     ret = qzCompress(&m_sess, reinterpret_cast<const unsigned char *>(source), &source_size, reinterpret_cast<unsigned char *>(dest), &dest_size, last_flag);
     if (ret != QZ_OK)
     {
         throw Exception("Cannot compress", ErrorCodes::CANNOT_COMPRESS);
     }
+    LOG_WARNING(log, "doCompressData called done.");
 // TODO: check whether the compressed  result of LZ4 has header and footer .
     return dest_size;
 }
@@ -128,16 +133,18 @@ unsigned int CompressionCodecQatLZ4::doCompressData(const char * source, unsigne
 void CompressionCodecQatLZ4::doDecompressData(const char * source, unsigned int source_size, char * dest, unsigned int uncompressed_size) const
 {
     Int32  ret = QZ_OK;
-
+    LOG_WARNING(log, "doDecompressData called.");
     ret = qzDecompress(&m_sess, reinterpret_cast<const unsigned char *>(source), &source_size, reinterpret_cast<unsigned char *>(dest), &uncompressed_size);
     if (ret != QZ_OK)
     {
         throw Exception("Cannot decompress", ErrorCodes::CANNOT_DECOMPRESS);
     }
+    LOG_WARNING(log, "doDecompressData called done.");
 }
 
 void registerCodecQatLZ4(CompressionCodecFactory & factory)
 {
+    LOG_WARNING(&Poco::Logger::get("CompressionCodecQatLZ4"), "registerCodecQatLZ4 called.");
     factory.registerSimpleCompressionCodec("QATLZ4", static_cast<UInt8>(CompressionMethodByte::QATLZ4), [&] ()
     {
         return std::make_shared<CompressionCodecQatLZ4>();

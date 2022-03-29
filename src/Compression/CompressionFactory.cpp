@@ -185,7 +185,7 @@ CompressionCodecFactory::CompressionCodecFactory()
     registerCodecGorilla(*this);
     registerCodecEncrypted(*this);
     registerCodecMultiple(*this);
-	registerCodecQatLZ4(*this);
+    registerCodecQatLZ4(*this);
 
     default_codec = get("QATLZ4", {});
 }
