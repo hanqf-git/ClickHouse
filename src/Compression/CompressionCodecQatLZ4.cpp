@@ -24,7 +24,169 @@
 namespace DB
 {
 
-QzSession_T m_sess;  // TODO: make a session pool to use
+namespace ErrorCodes
+{
+    extern const int CANNOT_COMPRESS;
+    extern const int CANNOT_DECOMPRESS;
+    extern const int ILLEGAL_SYNTAX_FOR_CODEC_TYPE;
+    extern const int ILLEGAL_CODEC_PARAMETER;
+}
+
+class SessionPool
+{
+public:
+    SessionPool();
+    ~SessionPool();
+    static SessionPool & instance();
+    static constexpr auto sessionPoolSize = 1024;
+    static QzSession_T * sessionPool[sessionPoolSize];
+    static std::atomic_bool sessionLock[sessionPoolSize];
+
+    QzSession_T *ALWAYS_INLINE acquireSession(uint32_t *index_p)
+    {
+        uint32_t retry = 0;
+        auto index = random(sessionPoolSize);
+        while (tryLockSession(index) == false)
+        {
+            index = random(sessionPoolSize);
+            retry++;
+            if(retry > sessionPoolSize)
+            {
+                return nullptr;               
+            }
+        }
+        *index_p = index;
+        return sessionPool[index];
+    }
+    QzSession_T * ALWAYS_INLINE releaseSession(uint32_t index)
+    {
+        ReleaseSessionObjectGuard _(index);
+        return sessionPool[index];
+    }
+
+private:
+    size_t ALWAYS_INLINE random(uint32_t pool_size)
+    {
+        size_t tsc = 0;
+        unsigned lo, hi;
+        __asm__ volatile("rdtsc" : "=a" (lo), "=d" (hi): : );
+        tsc = (((static_cast<uint64_t>(hi)) << 32) | (static_cast<uint64_t>(lo)));
+        return (static_cast<size_t>((tsc*44485709377909ULL)>>4)) % pool_size;
+    }
+
+    int32_t ALWAYS_INLINE init_sess_helper(QzSession_T * sess_ptr)
+    {
+        if (sess_ptr == nullptr)
+        {
+            return -1;
+        }
+        auto ret = qzSetupSession(sess_ptr, &m_params);
+        if (ret != QZ_OK)
+        {
+            return -1;
+        }
+        return 0;
+    }
+
+    void ALWAYS_INLINE get_default_parameter()
+    {
+        qzGetDefaults(&m_params);
+        m_params.data_fmt           = QZ_LZ4_FH;
+        m_params.comp_lvl           = 1;
+        m_params.comp_algorithm     = QZ_LZ4;
+        m_params.sw_backup          = 0;
+        m_params.hw_buff_sz         = QZ_HW_BUFF_SZ;
+        m_params.strm_buff_sz       = QZ_HW_BUFF_SZ;
+        m_params.input_sz_thrshold  = QZ_COMP_THRESHOLD_MINIMUM;
+    }
+
+    int32_t ALWAYS_INLINE initSessionPool()
+    {
+        static bool initialized = false;
+
+        if (initialized == false)
+        {
+            const int32_t size = sizeof(QzSession_T);
+            if (size < 0) return -1;
+            for (int i = 0; i < sessionPoolSize; ++i)
+            {
+                sessionPool[i] = nullptr;
+                QzSession_T *sess_ptr = reinterpret_cast<QzSession_T *>(new uint8_t [size]);
+                if (init_sess_helper(sess_ptr) < 0) return -1;
+                sessionPool[i] = sess_ptr;
+                sessionLock[i].store(false);
+            }
+            initialized = true;
+        }
+        return 0;
+    }
+
+    bool ALWAYS_INLINE tryLockSession(size_t index)
+    {
+        bool expected = false;
+        return sessionLock[index].compare_exchange_strong(expected, true);
+    }
+
+    void ALWAYS_INLINE destroySessionPool()
+    {
+        const uint32_t size = sizeof(QzSessionParams_T);
+        for (uint32_t i = 0; i < sessionPoolSize && size > 0; ++i)
+        {
+            while (tryLockSession(i) == false) {}
+            if (sessionPool[i])
+            {
+                qzTeardownSession(sessionPool[i]);
+                delete[] sessionPool[i];
+            }
+            sessionPool[i] = nullptr;
+            sessionLock[i].store(false);
+        }
+    }
+
+    struct ReleaseSessionObjectGuard
+    {
+        uint32_t index;
+        ReleaseSessionObjectGuard() = delete;
+    public:
+        ALWAYS_INLINE ReleaseSessionObjectGuard(const uint32_t i) : index(i) {}
+        ALWAYS_INLINE ~ReleaseSessionObjectGuard() { sessionLock[index].store(false); }
+    };
+
+    private:
+        QzSessionParams_T m_params;
+        uint8_t m_sw_backup = 1; //sw backup enabled.
+};
+
+QzSession_T *SessionPool::sessionPool[SessionPool::sessionPoolSize];
+std::atomic_bool SessionPool::sessionLock[SessionPool::sessionPoolSize];
+
+SessionPool & SessionPool::instance()
+{
+    static SessionPool ret;
+    return ret;
+}
+
+SessionPool::SessionPool()
+{
+    QzSession_T tempSess;
+    int ret = qzInit(&tempSess, m_sw_backup);
+    if (QZ_PARAMS == ret || QZ_NOSW_NO_HW == ret || QZ_FAIL == ret) 
+    {
+        throw Exception("QatLZ4 init failed", ErrorCodes::ILLEGAL_CODEC_PARAMETER);
+    }
+    get_default_parameter();
+
+    if( initSessionPool() < 0 )
+    {
+        throw Exception("SessionPool initializing fail!", ErrorCodes::CANNOT_COMPRESS);
+    }
+}
+SessionPool::~SessionPool()
+{
+    QzSession_T tempSess;
+    destroySessionPool();
+    qzClose(&tempSess);
+}
 
 class CompressionCodecQatLZ4 : public  ICompressionCodec  // TODO: can be derived from CompressionCodecLZ4 to only replace compression or decompression, to let QAT only do com or dec task.
 {
@@ -46,43 +208,12 @@ protected:
     bool isGenericCompression() const override { return true; }
 
 private:
-    QzSessionParams_T m_params;
-    uint8_t m_sw_backup = 1; //sw backup enabled.
     Poco::Logger * log = &Poco::Logger::get("CompressionCodecQatLZ4");
 };
-
-namespace ErrorCodes
-{
-    extern const int CANNOT_COMPRESS;
-    extern const int CANNOT_DECOMPRESS;
-    extern const int ILLEGAL_SYNTAX_FOR_CODEC_TYPE;
-    extern const int ILLEGAL_CODEC_PARAMETER;
-}
 
 CompressionCodecQatLZ4::CompressionCodecQatLZ4()
 {
     setCodecDescription("QATLZ4");
-
-    int ret = qzInit(&m_sess, m_sw_backup);
-    if (QZ_PARAMS == ret || QZ_NOSW_NO_HW == ret || QZ_FAIL == ret) 
-    {
-        throw Exception("QatLZ4 init failed", ErrorCodes::ILLEGAL_CODEC_PARAMETER);
-    }
-
-    qzGetDefaults(&m_params);
-    m_params.data_fmt           = QZ_LZ4_FH;
-    m_params.comp_lvl           = 1;
-    m_params.comp_algorithm     = QZ_LZ4;
-    m_params.sw_backup          = 0;
-    m_params.hw_buff_sz         = QZ_HW_BUFF_SZ;
-    m_params.strm_buff_sz       = QZ_HW_BUFF_SZ;
-    m_params.input_sz_thrshold  = QZ_COMP_THRESHOLD_MINIMUM;
-
-    ret = qzSetupSession(&m_sess, &m_params);
-    if (ret != QZ_OK)
-    {
-        throw Exception("QatLZ4 setup session failed", ErrorCodes::ILLEGAL_CODEC_PARAMETER);
-    }
     LOG_WARNING(log, "CompressionCodecQatLZ4() called.");
 }
 
@@ -116,29 +247,48 @@ unsigned int CompressionCodecQatLZ4::getMaxCompressedDataSize(unsigned int uncom
 
 unsigned int CompressionCodecQatLZ4::doCompressData(const char * source, unsigned int source_size, char * dest) const
 {
+    LOG_WARNING(log, "doCompressData called.");
+    uint32_t sessionIndex = 0;
+    QzSession_T * sessPtr = SessionPool::instance().acquireSession(&sessionIndex);
+    if(sessPtr == nullptr)
+    {
+        LOG_WARNING(log, "QATLZ4 compression Acquire session failed!");
+        throw Exception("Cannot compress", ErrorCodes::CANNOT_COMPRESS);
+    }
+
     Int32  ret = QZ_OK;
     unsigned int dest_size = getMaxCompressedDataSize(source_size);
     unsigned int last_flag = 1;
-    LOG_WARNING(log, "doCompressData called.");
-    ret = qzCompress(&m_sess, reinterpret_cast<const unsigned char *>(source), &source_size, reinterpret_cast<unsigned char *>(dest), &dest_size, last_flag);
+    ret = qzCompress(sessPtr, reinterpret_cast<const unsigned char *>(source), &source_size, reinterpret_cast<unsigned char *>(dest), &dest_size, last_flag);
     if (ret != QZ_OK)
     {
+        LOG_WARNING(log, "QATLZ4 compress failed!");
         throw Exception("Cannot compress", ErrorCodes::CANNOT_COMPRESS);
     }
+    SessionPool::instance().releaseSession(sessionIndex);
     LOG_WARNING(log, "doCompressData called done.");
-// TODO: check whether the compressed  result of LZ4 has header and footer .
     return dest_size;
 }
 
 void CompressionCodecQatLZ4::doDecompressData(const char * source, unsigned int source_size, char * dest, unsigned int uncompressed_size) const
 {
-    Int32  ret = QZ_OK;
     LOG_WARNING(log, "doDecompressData called.");
-    ret = qzDecompress(&m_sess, reinterpret_cast<const unsigned char *>(source), &source_size, reinterpret_cast<unsigned char *>(dest), &uncompressed_size);
+
+    uint32_t sessionIndex = 0;
+    QzSession_T * sessPtr = SessionPool::instance().acquireSession(&sessionIndex);
+    if(sessPtr == nullptr)
+    {
+        LOG_WARNING(log, "QATLZ4 decompression acquire session failed!");
+        throw Exception("Cannot compress", ErrorCodes::CANNOT_COMPRESS);
+    }
+
+    Int32  ret = QZ_OK;
+    ret = qzDecompress(sessPtr, reinterpret_cast<const unsigned char *>(source), &source_size, reinterpret_cast<unsigned char *>(dest), &uncompressed_size);
     if (ret != QZ_OK)
     {
         throw Exception("Cannot decompress", ErrorCodes::CANNOT_DECOMPRESS);
     }
+    SessionPool::instance().releaseSession(sessionIndex);
     LOG_WARNING(log, "doDecompressData called done.");
 }
 
