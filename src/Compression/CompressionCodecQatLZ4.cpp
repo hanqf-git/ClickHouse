@@ -94,7 +94,7 @@ private:
         m_params.data_fmt           = QZ_LZ4_FH;
         m_params.comp_lvl           = 1;
         m_params.comp_algorithm     = QZ_LZ4;
-        m_params.sw_backup          = 0;
+        m_params.sw_backup          = 1;
         m_params.hw_buff_sz         = QZ_HW_BUFF_SZ;
         m_params.strm_buff_sz       = QZ_HW_BUFF_SZ;
         m_params.input_sz_thrshold  = QZ_COMP_THRESHOLD_MINIMUM;
@@ -141,6 +141,7 @@ private:
             sessionPool[i] = nullptr;
             sessionLock[i].store(false);
         }
+        LOG_TRACE(&Poco::Logger::get("CompressionCodecQatLZ4"), "destroySessionPool done.");
     }
 
     struct ReleaseSessionObjectGuard
@@ -154,7 +155,7 @@ private:
 
     private:
         QzSessionParams_T m_params;
-        uint8_t m_sw_backup = 1; //sw backup enabled.
+        uint8_t m_sw_backup = 1; //sw backup diabled.
 };
 
 QzSession_T *SessionPool::sessionPool[SessionPool::sessionPoolSize];
@@ -178,20 +179,23 @@ SessionPool::SessionPool()
 
     if( initSessionPool() < 0 )
     {
-        throw Exception("SessionPool initializing fail!", ErrorCodes::CANNOT_COMPRESS);
+        throw Exception("SessionPool initializing fail!", ErrorCodes::ILLEGAL_CODEC_PARAMETER);
     }
 }
 SessionPool::~SessionPool()
 {
+    LOG_TRACE(&Poco::Logger::get("CompressionCodecQatLZ4"), "~SessionPool called.");
     QzSession_T tempSess;
     destroySessionPool();
     qzClose(&tempSess);
+    LOG_TRACE(&Poco::Logger::get("CompressionCodecQatLZ4"), "~SessionPool done.");
 }
 
 class CompressionCodecQatLZ4 : public  ICompressionCodec  // TODO: can be derived from CompressionCodecLZ4 to only replace compression or decompression, to let QAT only do com or dec task.
 {
 public:
     explicit CompressionCodecQatLZ4();
+    ~CompressionCodecQatLZ4() override;
 
     uint8_t getMethodByte() const override;
 
@@ -214,7 +218,12 @@ private:
 CompressionCodecQatLZ4::CompressionCodecQatLZ4()
 {
     setCodecDescription("QATLZ4");
-    LOG_WARNING(log, "CompressionCodecQatLZ4() called.");
+    LOG_TRACE(log, "CompressionCodecQatLZ4() called.");
+}
+
+CompressionCodecQatLZ4::~CompressionCodecQatLZ4()
+{
+    LOG_TRACE(log, "~CompressionCodecQatLZ4() called.");
 }
 
 uint8_t CompressionCodecQatLZ4::getMethodByte() const
@@ -239,21 +248,23 @@ unsigned int CompressionCodecQatLZ4::getMaxCompressedDataSize(unsigned int uncom
     /* Formula for GEN4 LZ4:
      * sourceLen + Ceil(sourceLen/1520) * 13 + 1024 */
     outputSizeLong = inputSizeLong + 1024;
-    outputSizeLong += CEIL_DIV(inputSizeLong, 1520) * 13;
+    outputSizeLong += CEIL_DIV(inputSizeLong, 1520) * 13 ;
     outputSizeLong += 19 + 8; //lz4 header and footer
+
+    LOG_TRACE(log, "QatLz4 getMaxCompressedDataSize ,uncompressed_size {}, max compressed size {} .", uncompressed_size, (unsigned int)outputSizeLong );
 
     return (unsigned int)outputSizeLong;
 }
 
 unsigned int CompressionCodecQatLZ4::doCompressData(const char * source, unsigned int source_size, char * dest) const
 {
-    LOG_WARNING(log, "doCompressData called.");
+    LOG_TRACE(log, "doCompressData called.");
     uint32_t sessionIndex = 0;
     QzSession_T * sessPtr = SessionPool::instance().acquireSession(&sessionIndex);
     if(sessPtr == nullptr)
     {
         LOG_WARNING(log, "QATLZ4 compression Acquire session failed!");
-        throw Exception("Cannot compress", ErrorCodes::CANNOT_COMPRESS);
+        throw Exception("Cannot compress, session ptr null", ErrorCodes::CANNOT_COMPRESS);
     }
 
     Int32  ret = QZ_OK;
@@ -262,39 +273,42 @@ unsigned int CompressionCodecQatLZ4::doCompressData(const char * source, unsigne
     ret = qzCompress(sessPtr, reinterpret_cast<const unsigned char *>(source), &source_size, reinterpret_cast<unsigned char *>(dest), &dest_size, last_flag);
     if (ret != QZ_OK)
     {
+        SessionPool::instance().releaseSession(sessionIndex);
         LOG_WARNING(log, "QATLZ4 compress failed!");
-        throw Exception("Cannot compress", ErrorCodes::CANNOT_COMPRESS);
+        throw Exception("Cannot compress, compress return error", ErrorCodes::CANNOT_COMPRESS);
     }
     SessionPool::instance().releaseSession(sessionIndex);
-    LOG_WARNING(log, "doCompressData called done.");
+    LOG_TRACE(log, "doCompressData called done.");
     return dest_size;
 }
 
 void CompressionCodecQatLZ4::doDecompressData(const char * source, unsigned int source_size, char * dest, unsigned int uncompressed_size) const
 {
-    LOG_WARNING(log, "doDecompressData called.");
+    LOG_TRACE(log, "doDecompressData called.");
 
     uint32_t sessionIndex = 0;
     QzSession_T * sessPtr = SessionPool::instance().acquireSession(&sessionIndex);
     if(sessPtr == nullptr)
     {
         LOG_WARNING(log, "QATLZ4 decompression acquire session failed!");
-        throw Exception("Cannot compress", ErrorCodes::CANNOT_COMPRESS);
+        throw Exception("Cannot decompress, session ptr null", ErrorCodes::CANNOT_DECOMPRESS);
     }
 
     Int32  ret = QZ_OK;
     ret = qzDecompress(sessPtr, reinterpret_cast<const unsigned char *>(source), &source_size, reinterpret_cast<unsigned char *>(dest), &uncompressed_size);
     if (ret != QZ_OK)
-    {
-        throw Exception("Cannot decompress", ErrorCodes::CANNOT_DECOMPRESS);
+    {  
+        SessionPool::instance().releaseSession(sessionIndex);
+        LOG_WARNING(log, "Cannot decompress, decompress return error code {}!", ret);
+        throw Exception("Cannot decompress, decompress return error", ErrorCodes::CANNOT_DECOMPRESS);
     }
     SessionPool::instance().releaseSession(sessionIndex);
-    LOG_WARNING(log, "doDecompressData called done.");
+    LOG_TRACE(log, "doDecompressData called done.");
 }
 
 void registerCodecQatLZ4(CompressionCodecFactory & factory)
 {
-    LOG_WARNING(&Poco::Logger::get("CompressionCodecQatLZ4"), "registerCodecQatLZ4 called.");
+    LOG_TRACE(&Poco::Logger::get("CompressionCodecQatLZ4"), "registerCodecQatLZ4 called.");
     factory.registerSimpleCompressionCodec("QATLZ4", static_cast<UInt8>(CompressionMethodByte::QATLZ4), [&] ()
     {
         return std::make_shared<CompressionCodecQatLZ4>();
