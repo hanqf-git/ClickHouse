@@ -20,7 +20,7 @@
 
 namespace DB
 {
-#define _REPLACE_LZ4_
+#define REPLACE_LZ4
 namespace ErrorCodes
 {
     extern const int CANNOT_COMPRESS;
@@ -83,7 +83,6 @@ void CompressionCodecQatLZ4::updateHash(SipHash & hash) const
 {
     getCodecDesc()->updateTreeHash(hash);
 }
-#define CEIL_DIV(x, y) (((x) + (y)-1) / (y))
 
 unsigned int CompressionCodecQatLZ4::getMaxCompressedDataSize(unsigned int uncompressed_size) const
 {
@@ -114,8 +113,8 @@ void CompressionCodecQatLZ4::doDecompressData(const char * source, unsigned int 
 {
     LOG_TRACE(log, "doDecompressData called.");
 
-    int32_t  ret = QZ_OK;
-    ret = qat_codec_ptr->doDecompressData(source,  source_size,  dest, uncompressed_size)
+    int32_t  ret = 0;
+    ret = qat_codec_ptr->doDecompressData(source,  source_size,  dest, uncompressed_size);
     if (ret != 0)
     {
         LOG_WARNING(log, "Cannot decompress, decompress return error code {}!", ret);
