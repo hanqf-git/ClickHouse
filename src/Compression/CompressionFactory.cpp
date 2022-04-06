@@ -173,11 +173,11 @@ void registerCodecEncrypted(CompressionCodecFactory & factory);
 void registerCodecMultiple(CompressionCodecFactory & factory);
 void registerCodecQatLZ4(CompressionCodecFactory & factory);
 
-#define _REPLACE_LZ4_
+#define REPLACE_LZ4
 
 CompressionCodecFactory::CompressionCodecFactory()
 {
-#ifndef _REPLACE_LZ4_
+#ifndef REPLACE_LZ4
     registerCodecLZ4(*this);
 #endif
     registerCodecNone(*this);
@@ -190,7 +190,7 @@ CompressionCodecFactory::CompressionCodecFactory()
     registerCodecEncrypted(*this);
     registerCodecMultiple(*this);
     registerCodecQatLZ4(*this);
-#ifndef _REPLACE_LZ4_
+#ifndef REPLACE_LZ4
     default_codec = get("QATLZ4", {});
 #else
     default_codec = get("LZ4", {});

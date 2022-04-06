@@ -56,7 +56,7 @@ private:
 
 CompressionCodecQatLZ4::CompressionCodecQatLZ4()
 {
-#ifdef _REPLACE_LZ4_
+#ifdef REPLACE_LZ4
     setCodecDescription("LZ4");
 #else
     setCodecDescription("QATLZ4");
@@ -72,7 +72,7 @@ CompressionCodecQatLZ4::~CompressionCodecQatLZ4()
 
 uint8_t CompressionCodecQatLZ4::getMethodByte() const
 {
-#ifdef _REPLACE_LZ4_
+#ifdef REPLACE_LZ4
     return static_cast<uint8_t>(CompressionMethodByte::LZ4);
 #else
     return static_cast<uint8_t>(CompressionMethodByte::QATLZ4);
@@ -128,7 +128,7 @@ void registerCodecQatLZ4(CompressionCodecFactory & factory)
 {
     LOG_TRACE(&Poco::Logger::get("CompressionCodecQatLZ4"), "registerCodecQatLZ4 called.");
 
-#ifdef _REPLACE_LZ4_
+#ifdef REPLACE_LZ4
     factory.registerSimpleCompressionCodec("LZ4", static_cast<UInt8>(CompressionMethodByte::LZ4), [&] ()
     {
         return std::make_shared<CompressionCodecQatLZ4>();
