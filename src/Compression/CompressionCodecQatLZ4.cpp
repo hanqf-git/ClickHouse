@@ -51,7 +51,8 @@ protected:
 
 private:
     Poco::Logger * log = &Poco::Logger::get("CompressionCodecQatLZ4");
-    std::shared_ptr<QatCodec> qat_codec_ptr = getQatCodecInstance();
+    //std::shared_ptr<QatCodec> qat_codec_ptr;
+    QatCodec * qat_codec_ptr;
 };
 
 CompressionCodecQatLZ4::CompressionCodecQatLZ4()
@@ -62,11 +63,14 @@ CompressionCodecQatLZ4::CompressionCodecQatLZ4()
     setCodecDescription("QATLZ4");
 #endif
 
+    qat_codec_ptr = getQatCodecInstance();
+
     LOG_TRACE(log, "CompressionCodecQatLZ4() called.");
 }
 
 CompressionCodecQatLZ4::~CompressionCodecQatLZ4()
 {
+    delete qat_codec_ptr;
     LOG_TRACE(log, "~CompressionCodecQatLZ4() called.");
 }
 
