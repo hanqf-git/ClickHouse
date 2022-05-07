@@ -1,4 +1,5 @@
 #include "QatCodec.h"
+#include <lz4.h>
 
 #include <Poco/Logger.h>
 #include <base/logger_useful.h>
@@ -53,6 +54,7 @@ private:
     Poco::Logger * log = &Poco::Logger::get("CompressionCodecQatLZ4");
     //std::shared_ptr<QatCodec> qat_codec_ptr;
     QatCodec * qat_codec_ptr;
+    mutable LZ4::PerformanceStatistics lz4_stat;
 };
 
 CompressionCodecQatLZ4::CompressionCodecQatLZ4()
@@ -105,8 +107,12 @@ unsigned int CompressionCodecQatLZ4::doCompressData(const char * source, unsigne
 
     if (0 == dest_size)
     {
-        LOG_WARNING(log, "QATLZ4 compress failed!");
-        throw Exception("Cannot compress, compress return error", ErrorCodes::CANNOT_COMPRESS);
+        LOG_WARNING(log, "QATLZ4 compress failed, try offical LZ4");
+        dest_size = LZ4_compress_default(source, dest, source_size, LZ4_COMPRESSBOUND(source_size));
+        if (0 == dest_size)
+        {
+            throw Exception("Cannot compress, compress return error", ErrorCodes::CANNOT_COMPRESS);
+        }
     }
 
     LOG_TRACE(log, "doCompressData called done.");
@@ -121,8 +127,12 @@ void CompressionCodecQatLZ4::doDecompressData(const char * source, unsigned int 
     ret = qat_codec_ptr->doDecompressData(source,  source_size,  dest, uncompressed_size);
     if (ret != 0)
     {
-        LOG_WARNING(log, "Cannot decompress, decompress return error code {}!", ret);
-        throw Exception("Cannot decompress, decompress return error", ErrorCodes::CANNOT_DECOMPRESS);
+        LOG_WARNING(log, "QATLZ4 decompress failed with error code {}, try offical LZ4!", ret);
+        bool success = LZ4::decompress(source, dest, source_size, uncompressed_size, lz4_stat);
+        if (!success)
+        {
+            throw Exception("Cannot decompress, decompress return error", ErrorCodes::CANNOT_DECOMPRESS);
+        }
     }
     LOG_TRACE(log, "doDecompressData called done.");
 }
