@@ -101,8 +101,10 @@ unsigned int CompressionCodecQatLZ4::getMaxCompressedDataSize(unsigned int uncom
 
 unsigned int CompressionCodecQatLZ4::doCompressData(const char * source, unsigned int source_size, char * dest) const
 {
-    //LOG_TRACE(log, "doCompressData called.");
+
 #if 0
+    //LOG_TRACE(log, "doCompressData called.");
+
     unsigned int dest_size = qat_codec_ptr->doCompressData(source, source_size, dest);
 
     if (0 == dest_size)
@@ -115,6 +117,7 @@ unsigned int CompressionCodecQatLZ4::doCompressData(const char * source, unsigne
         }
     }
 #endif
+    //LOG_TRACE(log, "doCompressDataSw called.");
     unsigned int dest_size = qat_codec_ptr->doCompressDataSw(source, source_size, dest);
     if (0 == dest_size)
     {
