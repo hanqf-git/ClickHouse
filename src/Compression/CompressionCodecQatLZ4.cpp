@@ -2,7 +2,7 @@
 #include <lz4.h>
 
 #include <Poco/Logger.h>
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 
 #include <Compression/ICompressionCodec.h>
 #include <Compression/CompressionInfo.h>
@@ -22,6 +22,8 @@
 namespace DB
 {
 #define REPLACE_LZ4
+#define ASYNC_MODE_SUPPORTED
+
 namespace ErrorCodes
 {
     extern const int CANNOT_COMPRESS;
@@ -45,9 +47,10 @@ protected:
     void doDecompressData(const char * source, uint32_t source_size, char * dest, uint32_t uncompressed_size) const override;
     bool isCompression() const override { return true; }
     bool isGenericCompression() const override { return true; }
+#ifdef ASYNC_MODE_SUPPORTED    
     void doDecompressDataReq(const char * source, uint32_t source_size, char * dest, uint32_t uncompressed_size) override;
     void doDecompressDataFlush(void) override;
-
+#endif
 private:
     uint32_t getMaxCompressedDataSize(uint32_t uncompressed_size) const override;
     Poco::Logger * log = &Poco::Logger::get("CompressionCodecQatLZ4");
@@ -76,7 +79,11 @@ CompressionCodecQatLZ4::~CompressionCodecQatLZ4()
 
 bool CompressionCodecQatLZ4::isAsyncSupported() const
 {
+#ifdef ASYNC_MODE_SUPPORTED
     return true;
+#else
+    return false;
+#endif
 }
 
 uint8_t CompressionCodecQatLZ4::getMethodByte() const
@@ -132,6 +139,7 @@ void CompressionCodecQatLZ4::doDecompressData(const char * source, uint32_t sour
     //LOG_TRACE(log, "doDecompressData called done.");
 }
 
+#ifdef ASYNC_MODE_SUPPORTED
 void CompressionCodecQatLZ4::doDecompressDataReq(const char * source, uint32_t source_size, char * dest, uint32_t uncompressed_size)
 {
     //LOG_TRACE(log, "doDecompressDataReq called.");
@@ -162,7 +170,7 @@ void CompressionCodecQatLZ4::doDecompressDataFlush(void)
     }
     //LOG_TRACE(log, "doDecompressDataFlush called done.");
 }
-
+#endif
 
 
 void registerCodecQatLZ4(CompressionCodecFactory & factory)
