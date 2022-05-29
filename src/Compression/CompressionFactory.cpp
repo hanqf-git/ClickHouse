@@ -167,6 +167,7 @@ void registerCodecLZ4HC(CompressionCodecFactory & factory);
 void registerCodecZSTD(CompressionCodecFactory & factory);
 void registerCodecMultiple(CompressionCodecFactory & factory);
 
+void registerCodecQatLZ4(CompressionCodecFactory & factory);
 
 /// Keeper use only general-purpose codecs, so we don't need these special codecs
 /// in standalone build
@@ -180,14 +181,18 @@ void registerCodecEncrypted(CompressionCodecFactory & factory);
 
 #endif
 
+#define REPLACE_LZ4
 CompressionCodecFactory::CompressionCodecFactory()
 {
     registerCodecNone(*this);
+#ifndef REPLACE_LZ4
     registerCodecLZ4(*this);
+#endif
     registerCodecZSTD(*this);
     registerCodecLZ4HC(*this);
     registerCodecMultiple(*this);
 
+    registerCodecQatLZ4(*this);
 #ifndef KEEPER_STANDALONE_BUILD
     registerCodecDelta(*this);
     registerCodecT64(*this);
@@ -196,7 +201,11 @@ CompressionCodecFactory::CompressionCodecFactory()
     registerCodecEncrypted(*this);
 #endif
 
+#ifndef REPLACE_LZ4
+    default_codec = get("QATLZ4", {});
+#else
     default_codec = get("LZ4", {});
+#endif
 }
 
 CompressionCodecFactory & CompressionCodecFactory::instance()

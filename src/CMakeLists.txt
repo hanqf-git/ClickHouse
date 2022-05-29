@@ -344,6 +344,15 @@ set_source_files_properties(
 target_link_libraries(clickhouse_common_io PUBLIC ch_contrib::re2_st)
 target_link_libraries(clickhouse_common_io PUBLIC ch_contrib::re2)
 
+set(QAT_LIBRARY "${ClickHouse_SOURCE_DIR}/contrib/qatcodec/libqat_s.so")
+set(USDM_LIBRARY "${ClickHouse_SOURCE_DIR}/contrib/qatcodec/libusdm_drv_s.so")
+set(QATCODEC_LIBRARY "${ClickHouse_SOURCE_DIR}/contrib/qatcodec/libqatcodec.so")
+set(QATCODEC_INCLUDE_DIR "${ClickHouse_SOURCE_DIR}/contrib/qatcodec")
+target_link_libraries (clickhouse_common_io PUBLIC  ${QAT_LIBRARY})
+target_link_libraries (clickhouse_common_io PUBLIC  ${USDM_LIBRARY})
+target_link_libraries (clickhouse_common_io PUBLIC  ${QATCODEC_LIBRARY})
+target_include_directories (clickhouse_common_io SYSTEM BEFORE PUBLIC ${QATCODEC_INCLUDE_DIR})
+
 target_link_libraries(clickhouse_common_io
         PRIVATE
             ${EXECINFO_LIBRARIES}
