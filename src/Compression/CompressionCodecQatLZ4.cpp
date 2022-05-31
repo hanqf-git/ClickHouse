@@ -56,7 +56,6 @@ private:
     Poco::Logger * log = &Poco::Logger::get("CompressionCodecQatLZ4");
     QatCodec * qat_codec_ptr;
     mutable LZ4::PerformanceStatistics lz4_stat;
-    uint32_t req_submited_count = 0;
 };
 
 CompressionCodecQatLZ4::CompressionCodecQatLZ4()
@@ -68,14 +67,11 @@ CompressionCodecQatLZ4::CompressionCodecQatLZ4()
 #endif
 
     qat_codec_ptr = getQatCodecInstance();
-
-    //LOG_TRACE(log, "CompressionCodecQatLZ4() called.");
 }
 
 CompressionCodecQatLZ4::~CompressionCodecQatLZ4()
 {
     delete qat_codec_ptr;
-    //LOG_TRACE(log, "~CompressionCodecQatLZ4() called.");
 }
 
 bool CompressionCodecQatLZ4::isAsyncSupported() const
@@ -105,27 +101,22 @@ unsigned int CompressionCodecQatLZ4::getMaxCompressedDataSize(uint32_t uncompres
 {
     unsigned int max_compressed_size = qat_codec_ptr->getMaxCompressedDataSize(uncompressed_size);
 
-    //LOG_TRACE(log, "QatLz4 getMaxCompressedDataSize ,uncompressed_size {}, max compressed size {} .", uncompressed_size, max_compressed_size );
-
     return max_compressed_size;
 }
 
 unsigned int CompressionCodecQatLZ4::doCompressData(const char * source, uint32_t source_size, char * dest) const
 {
-    //LOG_TRACE(log, "doCompressData called.");
     unsigned int dest_size = qat_codec_ptr->doCompressData(source, source_size, dest);
     if (0 == dest_size)
     {
         throw Exception("Cannot compress, compress return error", ErrorCodes::CANNOT_COMPRESS);
     }
 
-    //LOG_TRACE(log, "doCompressData called done.");
     return dest_size;
 }
 
 void CompressionCodecQatLZ4::doDecompressData(const char * source, uint32_t source_size, char * dest, uint32_t uncompressed_size) const
 {
-    //LOG_TRACE(log, "doDecompressData called.");
     int32_t  ret = 0;
     ret = qat_codec_ptr->doDecompressData(source,  source_size,  dest, uncompressed_size);
     if (ret != 0)
@@ -137,13 +128,11 @@ void CompressionCodecQatLZ4::doDecompressData(const char * source, uint32_t sour
             throw Exception("Cannot decompress, decompress return error", ErrorCodes::CANNOT_DECOMPRESS);
         }
     }
-    //LOG_TRACE(log, "doDecompressData called done.");
 }
 
 #ifdef ASYNC_MODE_SUPPORTED
 void CompressionCodecQatLZ4::doDecompressDataReq(const char * source, uint32_t source_size, char * dest, uint32_t uncompressed_size)
 {
-    //LOG_TRACE(log, "doDecompressDataReq called.");
     int32_t  ret = 0;
     ret = qat_codec_ptr->decompressReqSubmit(source,  source_size,  dest, uncompressed_size);
 
@@ -156,33 +145,22 @@ void CompressionCodecQatLZ4::doDecompressDataReq(const char * source, uint32_t s
             throw Exception("Cannot decompress, decompress return error", ErrorCodes::CANNOT_DECOMPRESS);
         }
     }
-    req_submited_count ++;
-    //LOG_TRACE(log, "doDecompressDataReq called done.");
 }
 
 void CompressionCodecQatLZ4::doDecompressDataFlush(void)
 {
-    //LOG_TRACE(log, "doDecompressDataFlush called.");
-    if (req_submited_count != 0)
+    int32_t  ret = 0;
+    ret = qat_codec_ptr->decompressReqFlush();
+    if (ret != 0)
     {
-        int32_t  ret = 0;
-        ret = qat_codec_ptr->decompressReqFlush();
-        if (ret != 0)
-        {
-            throw Exception("Cannot compress, doDecompressDataFlush return error", ErrorCodes::CANNOT_DECOMPRESS);
-        }
-
-        req_submited_count = 0;
+        throw Exception("Cannot compress, doDecompressDataFlush return error", ErrorCodes::CANNOT_DECOMPRESS);
     }
-
-    //LOG_TRACE(log, "doDecompressDataFlush called done.");
 }
 #endif
 
 
 void registerCodecQatLZ4(CompressionCodecFactory & factory)
 {
-    //LOG_TRACE(&Poco::Logger::get("CompressionCodecQatLZ4"), "registerCodecQatLZ4 called.");
 
 #ifdef REPLACE_LZ4
     factory.registerSimpleCompressionCodec("LZ4", static_cast<UInt8>(CompressionMethodByte::LZ4), [&] ()
