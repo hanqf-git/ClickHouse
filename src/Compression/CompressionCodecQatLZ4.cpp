@@ -121,8 +121,8 @@ void CompressionCodecQatLZ4::doDecompressData(const char * source, uint32_t sour
     ret = qat_codec_ptr->doDecompressData(source,  source_size,  dest, uncompressed_size);
     if (ret != 0)
     {
-        LOG_WARNING(log, "QATLZ4 decompress failed with error code {}, try offical LZ4!", ret);
-        bool success = LZ4::decompress(source, dest, source_size, uncompressed_size, lz4_stat);
+        LOG_INFO(log, "QATLZ4 decompress failed with error code {}, try LZ4 sw path!", ret);
+        bool success = LZ4::decompressMultiBlock(source, dest, source_size, uncompressed_size, lz4_stat);
         if (!success)
         {
             throw Exception("Cannot decompress, decompress return error", ErrorCodes::CANNOT_DECOMPRESS);
@@ -138,8 +138,8 @@ void CompressionCodecQatLZ4::doDecompressDataReq(const char * source, uint32_t s
 
     if (ret != 0)
     {
-        LOG_WARNING(log, "QATLZ4 doDecompressDataReq failed with error code {}, try offical LZ4!", ret);
-        bool success = LZ4::decompress(source, dest, source_size, uncompressed_size, lz4_stat);
+        LOG_INFO(log, "QATLZ4 doDecompressDataReq failed with error code {}, try LZ4 sw path!", ret);
+        bool success = LZ4::decompressMultiBlock(source, dest, source_size, uncompressed_size, lz4_stat);
         if (!success)
         {
             throw Exception("Cannot decompress, decompress return error", ErrorCodes::CANNOT_DECOMPRESS);

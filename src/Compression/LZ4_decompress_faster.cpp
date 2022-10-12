@@ -562,6 +562,172 @@ bool NO_INLINE decompressImpl(
     }
 }
 
+template <size_t copy_amount, bool use_shuffle>
+bool NO_INLINE decompressMultiBlockImpl(
+     const char * const source,
+     char * const dest,
+     size_t source_size,
+     size_t dest_size)
+{
+    const UInt8 * src_buf = reinterpret_cast<const UInt8 *>(source);
+    UInt8 * dst_buf = reinterpret_cast<UInt8 *>(dest);
+    const UInt8 * const src_end = src_buf + source_size;
+    UInt8 * const dst_end = dst_buf + dest_size;
+
+    const UInt8 * ip = src_buf;
+    UInt8 * op = dst_buf;
+    UInt8 * const output_begin = op;
+    UInt8 * const output_end = dst_end;
+
+    while (true)
+    {
+        UInt16 blk_length = *(UInt16 *)(ip);
+        ip = ip + 4; //Lz4 block header is 4 bytes
+        const UInt8 * const input_end = ip + blk_length;
+        //UInt8 * const output_begin = op;
+
+        /// Unrolling with clang is doing >10% performance degrade.
+#if defined(__clang__)
+        #pragma nounroll
+#endif
+        while (true)
+        {
+            size_t length;
+
+            auto continue_read_length = [&]
+            {
+                unsigned s;
+                do
+                {
+                    s = *ip++;
+                    length += s;
+                } while (unlikely(s == 255 && ip < input_end));
+            };
+
+            /// Get literal length.
+
+            if (unlikely(ip >= input_end))
+                return false;
+
+            const unsigned token = *ip++;
+            length = token >> 4;
+            if (length == 0x0F)
+            {
+                if (unlikely(ip + 1 >= input_end))
+                    return false;
+                continue_read_length();
+            }
+
+            /// Copy literals.
+
+            UInt8 * copy_end = op + length;
+
+            /// input: Hello, world
+            ///        ^-ip
+            /// output: xyz
+            ///            ^-op  ^-copy_end
+            /// output: xyzHello, w
+            ///                   ^- excessive copied bytes due to "wildCopy"
+            /// input: Hello, world
+            ///              ^-ip
+            /// output: xyzHello, w
+            ///                  ^-op (we will overwrite excessive bytes on next iteration)
+
+            if (unlikely(copy_end > output_end))
+                return false;
+
+            // Due to implementation specifics the copy length is always a multiple of copy_amount
+            size_t real_length = 0;
+
+            static_assert(copy_amount == 8 || copy_amount == 16 || copy_amount == 32);
+            if constexpr (copy_amount == 8)
+                real_length = (((length >> 3) + 1) * 8);
+            else if constexpr (copy_amount == 16)
+                real_length = (((length >> 4) + 1) * 16);
+            else if constexpr (copy_amount == 32)
+                real_length = (((length >> 5) + 1) * 32);
+
+            if (unlikely(ip + real_length >= input_end + ADDITIONAL_BYTES_AT_END_OF_BUFFER))
+                 return false;
+
+            wildCopy<copy_amount>(op, ip, copy_end);    /// Here we can write up to copy_amount - 1 bytes after buffer.
+
+            ip += length;
+            op = copy_end;
+
+            if (unlikely(ip == input_end))
+                break;  //one block  data processed done
+
+            /// Get match offset.
+
+            size_t offset = unalignedLoad<UInt16>(ip);
+            ip += 2;
+            const UInt8 * match = op - offset;
+
+            if (unlikely(match < output_begin))
+                return false;
+
+            /// Get match length.
+
+            length = token & 0x0F;
+            if (length == 0x0F)
+            {
+                if (unlikely(ip + 1 >= input_end))
+                    return false;
+                continue_read_length();
+            }
+            length += 4;
+
+            /// Copy match within block, that produce overlapping pattern. Match may replicate itself.
+
+            copy_end = op + length;
+
+            /** Here we can write up to copy_amount - 1 - 4 * 2 bytes after buffer.
+              * The worst case when offset = 1 and length = 4
+              */
+
+            if (unlikely(offset < copy_amount))
+            {
+                /// output: Hello
+                ///              ^-op
+                ///         ^-match; offset = 5
+                ///
+                /// output: Hello
+                ///         [------] - copy_amount bytes
+                ///              [------] - copy them here
+                ///
+                /// output: HelloHelloHel
+                ///            ^-match   ^-op
+
+                copyOverlap<copy_amount, use_shuffle>(op, match, offset);
+            }
+            else
+            {
+                copy<copy_amount>(op, match);
+                match += copy_amount;
+            }
+
+            op += copy_amount;
+
+            copy<copy_amount>(op, match);   /// copy_amount + copy_amount - 1 - 4 * 2 bytes after buffer.
+            if (length > copy_amount * 2)
+            {
+                if (unlikely(copy_end > output_end))
+                    return false;
+                wildCopy<copy_amount>(op + copy_amount, match + copy_amount, copy_end);
+            }
+
+            op = copy_end;
+        }
+
+        if (op == dst_end)
+        {
+            assert (ip == src_end);
+            return true;
+        }
+    }
+}
+
 }
 
 
@@ -606,6 +772,52 @@ bool decompress(
         return decompressImpl<8, false>(source, dest, source_size, dest_size);
     }
 }
+
+
+bool decompressMultiBlock(
+    const char * const source,
+    char * const dest,
+    size_t source_size,
+    size_t dest_size,
+    PerformanceStatistics & statistics [[maybe_unused]])
+{
+    if (source_size == 0 || dest_size == 0)
+        return true;
+
+    /// Don't run timer if the block is too small.
+    if (dest_size >= 32768)
+    {
+        size_t best_variant = statistics.select();
+
+        /// Run the selected method and measure time.
+
+        Stopwatch watch;
+        bool success = true;
+        if (best_variant == 0)
+            success = decompressMultiBlockImpl<16, true>(source, dest, source_size, dest_size);
+        if (best_variant == 1)
+            success = decompressMultiBlockImpl<16, false>(source, dest, source_size, dest_size);
+        if (best_variant == 2)
+            success = decompressMultiBlockImpl<8, true>(source, dest, source_size, dest_size);
+        if (best_variant == 3)
+            success = decompressMultiBlockImpl<32, false>(source, dest, source_size, dest_size);
+
+        watch.stop();
+
+        /// Update performance statistics.
+
+        statistics.data[best_variant].update(watch.elapsedSeconds(), dest_size);
+
+        return success;
+    }
+    else
+    {
+        return decompressImpl<8, false>(source, dest, source_size, dest_size);
+    }
+}
+
+
+
 
 
 void StreamStatistics::literal(size_t length)
