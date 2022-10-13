@@ -581,7 +581,7 @@ bool NO_INLINE decompressMultiBlockImpl(
 
     while (true)
     {
-        UInt16 blk_length = *(UInt16 *)(ip);
+        UInt16 blk_length = *reinterpret_cast<const UInt16 *>(ip);
         ip = ip + 4; //Lz4 block header is 4 bytes
         const UInt8 * const input_end = ip + blk_length;
         //UInt8 * const output_begin = op;

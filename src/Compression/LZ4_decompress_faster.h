@@ -136,6 +136,13 @@ bool decompress(
     size_t dest_size,
     PerformanceStatistics & statistics);
 
+bool decompressMultiBlock(
+    const char * const source,
+    char * const dest,
+    size_t source_size,
+    size_t dest_size,
+    PerformanceStatistics & statistics);
+
 
 /** Obtain statistics about LZ4 block useful for development.
   */
