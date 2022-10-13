@@ -584,7 +584,10 @@ bool NO_INLINE decompressMultiBlockImpl(
         UInt16 blk_length = *reinterpret_cast<const UInt16 *>(ip);
         ip = ip + 4; //Lz4 block header is 4 bytes
         const UInt8 * const input_end = ip + blk_length;
-        //UInt8 * const output_begin = op;
+        if (unlikely(input_end >src_end))
+        {
+            return false;
+        }
 
         /// Unrolling with clang is doing >10% performance degrade.
 #if defined(__clang__)
@@ -722,7 +725,6 @@ bool NO_INLINE decompressMultiBlockImpl(
 
         if (op == dst_end)
         {
-            assert (ip == src_end);
             return true;
         }
     }
